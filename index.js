@@ -14,12 +14,15 @@ const {
 const PROJECT_NAME = process.env('PROJECT_NAME');
 const SHEET_ID = process.env('SHEET_ID');
 const SHEET_TAB = process.env('SHEET_TAB');
+const SHEET_COLS = process.env('SHEET_COLS');
 const SHEET_RANGE = process.env('SHEET_RANGE');
 const BUCKET_NAME = process.env('BUCKET_NAME');
 const BUCKET_FILE_NAME = process.env('BUCKET_FILE_NAME');
+const ENCODING = process.env('ENCODING');
 
 /**
-  @getBucketOpts: retrieves the bucket options for this lambda
+  @getBucketOpts: retrieves the bucket options for storage ops
+  @param: { String } filePath
   @returns: { Object }
 */
 function getBucketOpts(filePath) {
@@ -29,6 +32,37 @@ function getBucketOpts(filePath) {
     //kmsKeyName: getAdminKMSPath(),
     private: true,
     predefinedAcl: 'projectPrivate'
+  };
+}
+
+/**
+  @getCSVOpts: returns the necessary options for the csv parser
+  @returns: { Object }
+*/
+function getCSVOpts() {
+  return {
+    fields: SHEET_COLS.split(',')
+  };
+}
+
+/**
+  @getTransformOpts: yields the options for the transformation
+  @returns: { Object }
+*/
+function getTransformOpts() {
+  return {
+    encoding: ENCODING
+  };
+}
+
+/**
+  @getStreamOpts: yields the options to use for the streams
+  @returns: { Object }
+*/
+function getStreamOpts() {
+  return {
+    gzip: true,
+    encoding: ENCODING
   };
 }
 
@@ -69,23 +103,29 @@ async function getSheet() {
 */
 async function getAndUploadReport(fileName) {
   try {
-    const encoding = 'utf8';
-    const readPath = './tmp.json';
+
+    const tmpPath = './tmp.json';
     const writePath = `./${SHEET_TAB}.csv`;
-    const csvOpts = {};
+    const csvOpts = getCSVOpts();
     const storageOpts = getBucketOpts(writePath);
-    const transOpts = { encoding };
+    const transOpts = getTransformOpts();
+    const streamOpts = getStreamOpts();
     const transform = new Transform(csvOpts, transOpts);
     const bucket = await getBucket();
     const sheet = await getSheet();
-    const toFile = await fs.writeFile(readPath, payload);
-    const reader = await createReadStream(readPath, { encoding });
-    const writer = await createWriteStream(writePath, { encoding });
+    const toFile = await fs.writeFile(tmpPath, payload);
+    const reader = await createReadStream(tmpPath, streamOpts);
+    const writer = await createWriteStream(writePath, streamOpts);
     const create = await reader.pipe(transform).pipe(writer);
-    const purge = await bucket.file(writePath).delete();
+
+    if (!bucket.file(writePath).exists()) {
+        const kill = await bucket.file(writePath).delete();
+    }
+
     const upload = await bucket.upload(writePath, opts);
 
     return upload;
+
   } catch(e) {
     return `getAndUploadReportError: ${e}`;
   }
