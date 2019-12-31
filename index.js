@@ -118,7 +118,7 @@ async function getAndUploadReport(fileName) {
     const writer = await createWriteStream(writePath, streamOpts);
     const create = await reader.pipe(transform).pipe(writer);
 
-    if (!bucket.file(writePath).exists()) {
+    if (bucket.file(writePath).exists()) {
         const kill = await bucket.file(writePath).delete();
     }
 
