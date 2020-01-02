@@ -4,6 +4,7 @@ const { auth } = require('google-auth-library');
 const { google } = require('googleapis');
 const { convertArrayToCSV } = require('convert-array-to-csv');
 const { writeFile } = require('fs').promises;
+const { tmpdir } = require('os');
 
 // ENV
 const PROJECT_NAME = process.env.PROJECT_NAME;
@@ -22,8 +23,7 @@ const ENCODING = process.env.ENCODING;
 function getBucketOpts(filename) {
   return {
     destination: filename,
-    resumable: true,
-    //kmsKeyName: getAdminKMSPath(),
+    resumable: false,
     private: true,
     predefinedAcl: 'projectPrivate'
   };
@@ -99,15 +99,14 @@ async function getSheet() {
 }
 
 /**
-  @getAndUploadReport: abstraction of all the mini utilities of the operation
+  Abstraction of all the mini utilities of the operation
   @param: { Object } body
   @returns: { Promise }
 */
 async function getAndUploadReport(body) {
   try {
-    const tmpPath = './tmp.json';
     const filename = `${SHEET_TAB}.csv`;
-    const writePath = `./${filename}`;
+    const writePath = `${tmpdir()}/${filename}`;
     const storageOpts = getBucketOpts(filename);
     const bucket = await getBucket();
     const csv = await getSheet();
@@ -129,7 +128,7 @@ async function getAndUploadReport(body) {
 }
 
 /**
-  @getReport: retrieves the report, then dumps it into the respective bucket
+  Retrieves the report, then dumps it into the respective bucket
   @param: { Object } req
   @param: { Object } res
   @returns: { Response }
