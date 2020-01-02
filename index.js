@@ -1,30 +1,27 @@
 // DEPS
-const { Storage } require('@google-cloud/storage');
-const { GoogleAuth } require('google-auth-library');
-const { google } require('googleapis');
-const path = require('path');
-const { Transform } = require('json2csv');
-const {
-  writeFile,
-  createReadStream,
-  createWriteStream
-}= require('fs').promises;
+const { Storage } = require('@google-cloud/storage');
+const { auth } = require('google-auth-library');
+const { google } = require('googleapis');
+const { convertArrayToCSV } = require('convert-array-to-csv');
+const { writeFile } = require('fs').promises;
 
 // ENV
-const PROJECT_NAME = process.env('PROJECT_NAME');
-const SHEET_ID = process.env('SHEET_ID');
-const SHEET_TAB = process.env('SHEET_TAB');
-const SHEET_RANGE = process.env('SHEET_RANGE');
-const BUCKET_NAME = process.env('BUCKET_NAME');
-const BUCKET_FILE_NAME = process.env('BUCKET_FILE_NAME');
+const PROJECT_NAME = process.env.PROJECT_NAME;
+const SHEET_ID = process.env.SHEET_ID;
+const SHEET_TAB = process.env.SHEET_TAB;
+const SHEET_COLS = process.env.SHEET_COLS;
+const SHEET_RANGE = process.env.SHEET_RANGE;
+const BUCKET_NAME = process.env.BUCKET_NAME;
+const ENCODING = process.env.ENCODING;
 
 /**
-  @getBucketOpts: retrieves the bucket options for this lambda
+  Retrieves the bucket options for storage ops
+  @param: { String } filename
   @returns: { Object }
 */
-function getBucketOpts(filePath) {
+function getBucketOpts(filename) {
   return {
-    destination: filePath,
+    destination: filename,
     resumable: true,
     //kmsKeyName: getAdminKMSPath(),
     private: true,
@@ -33,33 +30,72 @@ function getBucketOpts(filePath) {
 }
 
 /**
-  @getBucket: yields the bucket to store the csv in
+  Parses the environment, then yields the storage client options
+  @returns: { Object }
+*/
+function getStorageClientOpts() {
+  const {
+    client_email,
+    private_key
+  } = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+
+  return {
+    projectId: PROJECT_NAME,
+    credentials: {
+      client_email,
+      private_key,
+    }
+  };
+}
+
+/**
+  Yields the bucket to store the csv in
   @returns: { Promise }
 */
 async function getBucket() {
-  const client = new Storage();
+  const storageOpts = getStorageClientOpts();
+  const client = new Storage(storageOpts);
   const bucket = await client.bucket(BUCKET_NAME);
 
   return bucket;
 }
 
 /**
-  @getSheet: retrieves the google sheet and parses it as JSON
+  Retrieves the authentication components for the sheets api
+  @returns: { Object }
+*/
+function getSheetsAuth() {
+  const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+  const client = auth.fromJSON(credentials);
+
+  client.scopes = 'https://www.googleapis.com/auth/spreadsheets.readonly';
+
+  return client;
+}
+
+/**
+  Retrieves the google sheet and parses it as JSON
   @returns: { Promise }
 */
 async function getSheet() {
-  const encoding = 'utf8';
-  const version = 'v4';
-  const sheets = google.sheets({ version });
-  const spreadsheet = await sheets.spreadsheets.values.get({
-    spreadsheetID: SHEET_ID,
-    range: `${SHEET_TAB}!${SHEET_RANGE}`,
-  });
+  try {
+    const version = 'v4';
+    const header = SHEET_COLS.split(',');
+    const auth = getSheetsAuth();
+    const sheets = google.sheets({ version, auth });
+    const spreadsheet = await sheets.spreadsheets.values.get({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEET_TAB}!${SHEET_RANGE}`,
+    });
 
-  console.log('what is the data type?', spreadsheet.data.values);
-  const payload = JSON.stringify(spreadsheet.data.values);
+    return convertArrayToCSV(spreadsheet.data.values, {
+      header,
+      separator: ','
+    });
 
-  return payload;
+  } catch(e) {
+    throw new Error(`getSheet(): ${e}`);
+  }
 }
 
 /**
@@ -67,27 +103,28 @@ async function getSheet() {
   @param: { Object } body
   @returns: { Promise }
 */
-async function getAndUploadReport(fileName) {
+async function getAndUploadReport(body) {
   try {
-    const encoding = 'utf8';
-    const readPath = './tmp.json';
-    const writePath = `./${SHEET_TAB}.csv`;
-    const csvOpts = {};
-    const storageOpts = getBucketOpts(writePath);
-    const transOpts = { encoding };
-    const transform = new Transform(csvOpts, transOpts);
+    const tmpPath = './tmp.json';
+    const filename = `${SHEET_TAB}.csv`;
+    const writePath = `./${filename}`;
+    const storageOpts = getBucketOpts(filename);
     const bucket = await getBucket();
-    const sheet = await getSheet();
-    const toFile = await fs.writeFile(readPath, payload);
-    const reader = await createReadStream(readPath, { encoding });
-    const writer = await createWriteStream(writePath, { encoding });
-    const create = await reader.pipe(transform).pipe(writer);
-    const purge = await bucket.file(writePath).delete();
-    const upload = await bucket.upload(writePath, opts);
+    const csv = await getSheet();
+    const f = await writeFile(writePath, csv);
+    const exists = await bucket.file(filename).exists();
+
+    // kinda weird that the exists promise returns an array of size 1
+    if (exists[0]) {
+        const kill = await bucket.file(filename).delete();
+    }
+
+    const upload = await bucket.upload(writePath, storageOpts);
 
     return upload;
+
   } catch(e) {
-    return `getAndUploadReportError: ${e}`;
+    throw new Error(`getAndUploadReportError: ${e}`);
   }
 }
 
