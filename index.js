@@ -7,13 +7,15 @@ const { writeFile } = require('fs').promises;
 const { tmpdir } = require('os');
 
 // ENV
-const PROJECT_NAME = process.env.PROJECT_NAME;
-const SHEET_ID = process.env.SHEET_ID;
-const SHEET_TAB = process.env.SHEET_TAB;
-const SHEET_COLS = process.env.SHEET_COLS;
-const SHEET_RANGE = process.env.SHEET_RANGE;
-const BUCKET_NAME = process.env.BUCKET_NAME;
-const ENCODING = process.env.ENCODING;
+const {
+  PROJECT_NAME,
+  SHEET_ID,
+  SHEET_TAB,
+  SHEET_COLS,
+  SHEET_RANGE,
+  BUCKET_NAME,
+  ENCODING
+} = process.env;
 
 /**
   Retrieves the bucket options for storage ops
